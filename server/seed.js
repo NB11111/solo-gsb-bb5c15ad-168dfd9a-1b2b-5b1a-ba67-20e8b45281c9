@@ -19,7 +19,7 @@ const demo = {
     { id: 'e1', a: 'z1', b: 'z2', seconds: 5 },
     { id: 'e2', a: 'z2', b: 'z3', seconds: 8 },
     { id: 'e3', a: 'z3', b: 'z4', seconds: 10 },
-    { id: 'e4', a: 'z3', b: 'z5', seconds: 8 },
+    { id: 'e4', a: 'z3', b: 'z5', seconds: 8, narrow: true },
     { id: 'e5', a: 'z4', b: 'z5', seconds: 12 },
     { id: 'e6', a: 'z5', b: 'z6', seconds: 8 },
     { id: 'e7', a: 'z5', b: 'z7', seconds: 12 },
@@ -77,6 +77,8 @@ const demo = {
   ],
   // 第二幕 → 第三幕：换景时台心、左台口被景片与灯架封死
   blocks: [{ fromSceneId: 's2', toSceneId: 's3', zoneIds: ['z5', 'z3'] }],
+  // 注：e4（左台口 ↔ 台心）为窄通道——同一时刻仅一名演员通行、双向共用容量。
+  // 第一幕 → 第二幕中周萍（左台口→右台口）与蘩漪（台心→左台口）相向使用该通道，可看到等待调度。
 };
 
 module.exports = { seedPlays: [demo] };

@@ -5,10 +5,15 @@
  *
  * 文档结构:
  * {
- *   name, zones:[{id,name,x,y}], edges:[{id,a,b,seconds}], actors:[{id,name}],
+ *   name, zones:[{id,name,x,y}], edges:[{id,a,b,seconds,narrow}], actors:[{id,name}],
  *   scenes:[{id,name,durationFromPrev, placements:[{actorId,from,to}]}],
  *   blocks:[{fromSceneId,toSceneId,zoneIds:[]}]
  * }
+ *
+ * 窄通道（narrow）邻接边：同一时刻仅允许一名演员通行，双向共用一个容量。
+ * 每次转场按演员表顺序做预约调度：普通边可同时通行；窄通道边被某演员占用的
+ * 时间段内其他演员不得进入，后续演员可在区域等待或选择绕路（取计入等待后
+ * 最早到达的路线）。
  */
 
 /** 简单二叉最小堆，元素 [key, nodeId] */
@@ -153,6 +158,118 @@ function criticalBlockers(zones, edges, startId, targetId, blockedZoneIds) {
 }
 
 /**
+ * 在按 start 升序的占用区间中，找不早于 t 且使 [s, s+w) 与全部区间无交的最早 s。
+ * 每次与某区间冲突即推迟到该区间结束；s 单调不减，故不会与已越过的区间再次冲突。
+ */
+function earliestFreeStart(intervals, t, w) {
+  let s = t;
+  for (const iv of intervals) {
+    if (iv.end <= s) continue;
+    if (iv.start >= s + w) break;
+    s = iv.end;
+  }
+  return s;
+}
+
+/**
+ * 计入窄通道预约的最早到达路径（时间依赖 Dijkstra，允许在区域等待）。
+ * 普通边可随时进入；窄通道边需等 [s, s+w) 与已有预约无交后才可进入。
+ * 边的到达时间函数非递减（FIFO），故 Dijkstra 适用。
+ *
+ * @param reservations Map<edgeId, Array<{start,end,actorId,actorName}>> 按 start 升序
+ * @returns 不可达返回 null；否则返回 {
+ *   arriveAt, travelSeconds, totalWaitSeconds,
+ *   legs: [{edgeId,narrow,fromZoneId,toZoneId,arriveAtZone,enterAt,leaveAt,seconds,waitSeconds,blockers}],
+ *   waits: [{zoneId,edgeId,startAt,endAt,seconds,blockers}]
+ * }
+ */
+function schedulePath(zones, edges, startId, targetId, blockedZoneIds, reservations) {
+  const blocked = new Set(blockedZoneIds || []);
+  if (startId == null || !zones.some((z) => z.id === startId) || blocked.has(startId)) {
+    return null;
+  }
+
+  const adj = new Map();
+  for (const z of zones) adj.set(z.id, []);
+  for (const e of edges) {
+    if (!adj.has(e.a) || !adj.has(e.b)) continue;
+    adj.get(e.a).push(e);
+    adj.get(e.b).push(e);
+  }
+
+  const dist = new Map([[startId, 0]]);
+  const prev = new Map(); // nodeId -> { edge, from, arriveFromAt, enterAt, leaveAt, waitSeconds, blockers }
+  const visited = new Set();
+  const heap = new MinHeap();
+  heap.push(0, startId);
+
+  while (heap.size) {
+    const [d, u] = heap.pop();
+    if (visited.has(u)) continue;
+    visited.add(u);
+    for (const e of adj.get(u) || []) {
+      const v = e.a === u ? e.b : e.a;
+      if (blocked.has(v) || visited.has(v)) continue;
+      const w = Number(e.seconds);
+      let enterAt = d;
+      let blockers = [];
+      if (e.narrow && reservations) {
+        const ivs = reservations.get(e.id) || [];
+        enterAt = earliestFreeStart(ivs, d, w);
+        if (enterAt > d) {
+          // 与 [d, enterAt+w) 相交的预约即导致本次等待的占用者
+          blockers = ivs.filter((iv) => iv.end > d && iv.start < enterAt + w);
+        }
+      }
+      const nd = enterAt + w;
+      if (dist.get(v) == null || nd < dist.get(v)) {
+        dist.set(v, nd);
+        prev.set(v, { edge: e, from: u, arriveFromAt: d, enterAt, leaveAt: nd, waitSeconds: enterAt - d, blockers });
+        heap.push(nd, v);
+      }
+    }
+  }
+
+  if (!dist.has(targetId)) return null;
+
+  const legs = [];
+  let cur = targetId;
+  while (prev.has(cur)) {
+    const p = prev.get(cur);
+    legs.unshift({
+      edgeId: p.edge.id,
+      narrow: !!p.edge.narrow,
+      fromZoneId: p.from,
+      toZoneId: cur,
+      arriveAtZone: p.arriveFromAt, // 到达本段起点区域的时刻
+      enterAt: p.enterAt, // 实际进入本段边的时刻
+      leaveAt: p.leaveAt, // 离开本段边（抵达下一区域）的时刻
+      seconds: Number(p.edge.seconds),
+      waitSeconds: p.waitSeconds,
+      blockers: p.blockers.map((b) => ({ actorId: b.actorId, actorName: b.actorName, start: b.start, end: b.end })),
+    });
+    cur = p.from;
+  }
+  const waits = legs
+    .filter((l) => l.waitSeconds > 0)
+    .map((l) => ({
+      zoneId: l.fromZoneId,
+      edgeId: l.edgeId,
+      startAt: l.arriveAtZone,
+      endAt: l.enterAt,
+      seconds: l.waitSeconds,
+      blockers: l.blockers,
+    }));
+  return {
+    arriveAt: dist.get(targetId),
+    travelSeconds: legs.reduce((s, l) => s + l.seconds, 0),
+    totalWaitSeconds: waits.reduce((s, x) => s + x.seconds, 0),
+    legs,
+    waits,
+  };
+}
+
+/**
  * 校验并规整文档。返回 { errors:[], warnings:[], doc }
  */
 function validateDocument(input) {
@@ -191,6 +308,7 @@ function validateDocument(input) {
           a: String(e.a),
           b: String(e.b),
           seconds: Number(e.seconds),
+          narrow: !!e.narrow,
         }))
     : [];
 
@@ -313,13 +431,28 @@ function analyze(input) {
       actorCount: doc.actors.length,
       sceneCount: doc.scenes.length,
       transitionCount: Math.max(0, doc.scenes.length - 1),
+      narrowEdgeCount: doc.edges.filter((e) => e.narrow).length,
       checkedActorTransitions: 0,
       failedActorTransitions: 0,
+      congestedActorTransitions: 0,
     },
+    // 窄通道配置（供报告与导出展示）
+    narrowEdges: doc.edges
+      .filter((e) => e.narrow)
+      .map((e) => ({
+        edgeId: e.id,
+        aZoneId: e.a,
+        bZoneId: e.b,
+        aZoneName: zoneName(e.a),
+        bZoneName: zoneName(e.b),
+        seconds: e.seconds,
+      })),
     transitions: [],
     firstImpossible: null,
   };
   if (errors.length) return base;
+
+  const statusLabel = { timeout: '原本即超时', unreachable: '不可达', congested: '窄通道拥堵' };
 
   for (let i = 1; i < doc.scenes.length; i++) {
     const prevScene = doc.scenes[i - 1];
@@ -342,6 +475,19 @@ function analyze(input) {
       results: [],
     };
 
+    // 本次转场的窄通道预约表：edgeId -> [{start,end,actorId,actorName}]（按 start 升序）
+    // 按演员表顺序逐人规划；无论是否按时，已规划的占用都计入后续演员的调度。
+    const reservations = new Map();
+    const registerReservations = (schedule, actor) => {
+      for (const leg of schedule.legs) {
+        if (!leg.narrow) continue;
+        const arr = reservations.get(leg.edgeId) || [];
+        arr.push({ start: leg.enterAt, end: leg.leaveAt, actorId: actor.id, actorName: actor.name });
+        arr.sort((x, y) => x.start - y.start);
+        reservations.set(leg.edgeId, arr);
+      }
+    };
+
     for (const actor of doc.actors) {
       const prevP = prevScene.placements.find((p) => p.actorId === actor.id);
       const curP = scene.placements.find((p) => p.actorId === actor.id);
@@ -355,11 +501,15 @@ function analyze(input) {
         fromZoneId: startId,
         toZoneId: targetId,
         offstage: startId == null || targetId == null,
-        status: 'ok', // ok | unreachable | timeout | offstage
-        seconds: null,
+        status: 'ok', // ok | unreachable | timeout | congested | offstage
+        seconds: null, // 静态最短耗时（不计窄通道占用）
+        arriveAt: null, // 计入窄通道预约后的最早到达时刻（换场开始为 0）
+        waitSeconds: 0, // 因窄通道被占用产生的等待总时长
+        travelSeconds: null, // 调度路线的纯通行时间（> seconds 说明为避开占用而绕路）
         pathZoneIds: [],
         pathZoneNames: [],
         pathEdgeIds: [],
+        schedule: null, // 逐段行程与等待明细
         reason: null,
         baselineSeconds: null,
         baselinePathZoneIds: [],
@@ -380,19 +530,9 @@ function analyze(input) {
         continue;
       }
 
-      // 当前阻断条件下的最短路
+      // 当前阻断条件下的静态最短路（不计窄通道占用）
       const { dist, prev } = dijkstra(doc.zones, doc.edges, startId, blockedZoneIds);
-      if (dist.has(targetId)) {
-        const { nodes, edgeIds } = reconstructPath(prev, targetId);
-        result.seconds = dist.get(targetId);
-        result.pathZoneIds = nodes;
-        result.pathZoneNames = nodes.map(zoneName);
-        result.pathEdgeIds = edgeIds;
-        if (result.seconds > limit) {
-          result.status = 'timeout';
-          result.reason = `最短耗时 ${result.seconds} 秒，超过换场可用时长 ${limit} 秒，差 ${result.seconds - limit} 秒`;
-        }
-      } else {
+      if (!dist.has(targetId)) {
         // 无阻断基线，用于对比阻断影响
         const baseRun = dijkstra(doc.zones, doc.edges, startId, []);
         transition.possible = false;
@@ -423,6 +563,51 @@ function analyze(input) {
         continue;
       }
 
+      const { nodes, edgeIds } = reconstructPath(prev, targetId);
+      result.seconds = dist.get(targetId);
+      result.pathZoneIds = nodes;
+      result.pathZoneNames = nodes.map(zoneName);
+      result.pathEdgeIds = edgeIds;
+
+      // 计入窄通道预约的最早到达调度（可在区域等待或绕路）
+      const schedule = schedulePath(doc.zones, doc.edges, startId, targetId, blockedZoneIds, reservations);
+      result.arriveAt = schedule.arriveAt;
+      result.waitSeconds = schedule.totalWaitSeconds;
+      result.travelSeconds = schedule.travelSeconds;
+      result.schedule = {
+        departAt: 0,
+        arriveAt: schedule.arriveAt,
+        totalWaitSeconds: schedule.totalWaitSeconds,
+        legs: schedule.legs.map((l) => ({
+          ...l,
+          fromZoneName: zoneName(l.fromZoneId),
+          toZoneName: zoneName(l.toZoneId),
+        })),
+        waits: schedule.waits.map((w) => ({ ...w, zoneName: zoneName(w.zoneId) })),
+      };
+      registerReservations(schedule, actor);
+
+      // 失败原因三分：原本即超时 / 窄通道拥堵 / （上文的）阻断不可达
+      if (result.seconds > limit) {
+        result.status = 'timeout';
+        result.reason = `最短耗时 ${result.seconds} 秒，超过换场可用时长 ${limit} 秒，差 ${result.seconds - limit} 秒（不计窄通道占用即已超时）`;
+      } else if (result.arriveAt > limit) {
+        result.status = 'congested';
+        base.stats.congestedActorTransitions++;
+        result.reason =
+          `不计窄通道占用最短 ${result.seconds} 秒可达，但受前方演员占用窄通道影响共等待 ${result.waitSeconds} 秒，` +
+          `最早 ${result.arriveAt} 秒才能到达，超过换场可用时长 ${limit} 秒，差 ${result.arriveAt - limit} 秒`;
+      } else if (result.waitSeconds > 0) {
+        base.warnings.push(
+          `第 ${i + 1} 场转场：${actor.name} 受窄通道占用影响等待 ${result.waitSeconds} 秒（到达 ${result.arriveAt} 秒 / 限 ${limit} 秒）`,
+        );
+      }
+      if (result.travelSeconds > result.seconds) {
+        base.warnings.push(
+          `第 ${i + 1} 场转场：${actor.name} 为避开窄通道占用选择绕路，通行 ${result.travelSeconds} 秒（静态最短 ${result.seconds} 秒）`,
+        );
+      }
+
       // 可达时也给出无阻断基线，提示是否被迫绕行
       if (blockedZoneIds.length) {
         const baseRun = dijkstra(doc.zones, doc.edges, startId, []);
@@ -449,18 +634,20 @@ function analyze(input) {
             result.reason += '；若无不可穿越区域则可按时完成，超时由绕行导致';
           }
         }
+      } else if (result.status === 'congested') {
+        transition.possible = false;
       }
     }
 
-    const failed = transition.results.filter((r) => r.status === 'unreachable' || r.status === 'timeout');
+    const failed = transition.results.filter((r) => r.status === 'unreachable' || r.status === 'timeout' || r.status === 'congested');
     base.stats.failedActorTransitions += failed.length;
-    if (failed.length) transition.failureReason = `${failed.length} 位演员无法按时完成转场：${failed.map((r) => `${r.actorName}（${r.status === 'timeout' ? '超时' : '不可达'}）`).join('、')}`;
+    if (failed.length) transition.failureReason = `${failed.length} 位演员无法按时完成转场：${failed.map((r) => `${r.actorName}（${statusLabel[r.status]}）`).join('、')}`;
     base.transitions.push(transition);
   }
 
   const firstBad = base.transitions.find((t) => !t.possible);
   if (firstBad) {
-    const order = ['unreachable', 'timeout'];
+    const order = ['unreachable', 'timeout', 'congested'];
     let firstResult = null;
     for (const st of order) {
       firstResult = firstBad.results.find((r) => r.status === st);
@@ -479,4 +666,4 @@ function analyze(input) {
   return base;
 }
 
-module.exports = { analyze, validateDocument, dijkstra, reconstructPath, connectedComponent };
+module.exports = { analyze, validateDocument, dijkstra, reconstructPath, connectedComponent, schedulePath, earliestFreeStart };

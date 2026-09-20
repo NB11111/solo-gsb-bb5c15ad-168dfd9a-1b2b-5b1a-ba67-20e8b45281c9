@@ -1,12 +1,13 @@
 {
   "name": "stageblock",
   "version": "1.0.0",
-  "description": "话剧走位连续性检查 Web 应用：舞台区域邻接图编辑、转场可达性与最短路径分析",
+  "description": "话剧走位连续性检查 Web 应用：舞台区域邻接图编辑、窄通道预约调度、转场可达性与最早到达分析",
   "main": "server/index.js",
   "type": "commonjs",
   "scripts": {
     "start": "node server/index.js",
-    "dev": "node server/index.js"
+    "dev": "node server/index.js",
+    "test": "node test/analyzer.test.js && node test/frontend.test.js"
   },
   "dependencies": {
     "better-sqlite3": "^11.8.1",

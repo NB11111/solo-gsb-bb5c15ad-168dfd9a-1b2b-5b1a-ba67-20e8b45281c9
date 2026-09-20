@@ -119,7 +119,11 @@ main { padding: 18px 20px 60px; max-width: 1280px; margin: 0 auto; }
 .edge-line { stroke: #8a8f99; stroke-width: 3; fill: none; cursor: pointer; }
 .edge-line:hover { stroke: var(--primary); }
 .edge-line.selected { stroke: var(--primary); stroke-width: 5; }
+.edge-line.narrow { stroke: var(--warn); stroke-dasharray: 8 5; }
+.edge-line.narrow:hover { stroke: #b56f0a; }
+.edge-line.narrow.selected { stroke: #b56f0a; stroke-width: 5; }
 .edge-label-bg { fill: #fff; stroke: #c4c9d3; stroke-width: 1; rx: 4; cursor: pointer; }
+.edge-label-bg.narrow { fill: #fff6e8; stroke: var(--warn); }
 .edge-label { font-size: 13px; fill: var(--ink); text-anchor: middle; dominant-baseline: central; cursor: pointer; pointer-events: none; font-weight: 600; }
 
 .zone-circle {
@@ -148,6 +152,8 @@ main { padding: 18px 20px 60px; max-width: 1280px; margin: 0 auto; }
 .field input, .field select {
   padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; font-size: 13px;
 }
+.field .check-line { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink); cursor: pointer; }
+.field .check-line input { accent-color: var(--warn); }
 .inspector .btn { width: 100%; margin-top: 6px; }
 
 /* ---------- 场次 ---------- */
@@ -246,11 +252,30 @@ table.placements select { padding: 5px 6px; border: 1px solid var(--line); borde
 .ar-path { font-family: "SFMono-Regular", Consolas, monospace; font-size: 13px; color: var(--ink); }
 .ar-time { margin-left: auto; font-weight: 600; white-space: nowrap; }
 .ar-time.ok { color: var(--ok); }
-.ar-time.timeout, .ar-time.unreachable { color: var(--danger); }
+.ar-time.timeout, .ar-time.unreachable, .ar-time.congested { color: var(--danger); }
 .ar-time.offstage { color: var(--ink-soft); font-weight: 400; }
 .ar-reason { margin: 6px 0 0; font-size: 13px; color: var(--danger); background: #fdf3f3; border-left: 3px solid var(--danger); padding: 6px 10px; border-radius: 0 6px 6px 0; }
 .ar-note { margin: 4px 0 0; font-size: 12px; color: var(--ink-soft); }
 .baseline { color: var(--warn); }
+
+/* 行程明细（进入/离开时间与等待段） */
+.schedule-detail { margin-top: 6px; }
+.schedule-detail summary {
+  cursor: pointer; font-size: 12px; color: var(--primary); user-select: none;
+}
+.schedule-detail ul {
+  margin: 6px 0 2px; padding-left: 4px; list-style: none;
+  border-left: 2px solid #dbe3f3;
+}
+.schedule-detail li {
+  font-size: 12px; color: var(--ink-soft); padding: 3px 0 3px 12px; position: relative;
+}
+.schedule-detail li::before {
+  content: ''; position: absolute; left: -4px; top: 10px;
+  width: 6px; height: 6px; border-radius: 50%; background: #c5d4f7;
+}
+.schedule-detail li.wait { color: #8a5a1d; }
+.schedule-detail li.wait::before { background: var(--warn); }
 
 .warnings-box {
   background: #fff8ec; border: 1px solid #f0d9ae; border-radius: 10px; padding: 10px 16px; margin-bottom: 14px;
