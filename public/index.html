@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>StageBlock · 话剧走位连续性检查</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">🎭 StageBlock <span class="brand-sub">话剧走位连续性检查</span></div>
+    <div class="play-controls">
+      <label>剧目：
+        <select id="playSelect" title="选择已保存剧目"></select>
+      </label>
+      <input id="playName" type="text" class="play-name-input" placeholder="剧目名称" />
+      <button id="btnNew" class="btn">新建</button>
+      <button id="btnSaveAs" class="btn">另存为新剧目</button>
+      <button id="btnSave" class="btn btn-primary">保存</button>
+      <button id="btnDelete" class="btn btn-danger">删除</button>
+      <span id="dirtyBadge" class="dirty-badge hidden">未保存</span>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="map">① 舞台邻接图</button>
+    <button class="tab" data-tab="scenes">② 场次与走位</button>
+    <button class="tab" data-tab="blocks">③ 不可穿越区域</button>
+    <button class="tab" data-tab="check">④ 连续性检查</button>
+  </nav>
+
+  <main>
+    <!-- ① 舞台邻接图 -->
+    <section id="tab-map" class="tab-panel active">
+      <div class="map-layout">
+        <div class="canvas-wrap">
+          <svg id="stageSvg" viewBox="0 0 960 540">
+            <defs>
+              <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+                <path d="M0,0 L8,3 L0,6 z" fill="#8a8f99"></path>
+              </marker>
+            </defs>
+            <rect id="stageBg" x="0" y="0" width="960" height="540" rx="12" class="stage-bg"></rect>
+            <g id="edgeLayer"></g>
+            <g id="zoneLayer"></g>
+          </svg>
+        </div>
+        <aside class="side-panel">
+          <div class="toolbar">
+            <button id="btnAddZone" class="btn">＋ 添加区域</button>
+            <button id="btnConnectMode" class="btn">🔗 连线模式：关</button>
+          </div>
+          <div id="mapInspector" class="inspector">
+            <p class="hint">在舞台上点击区域可选中；拖动可移动位置。</p>
+            <p class="hint">「连线模式」开启后，依次点击两个区域即可建立邻接边。</p>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <!-- ② 场次与走位 -->
+    <section id="tab-scenes" class="tab-panel">
+      <div class="panel-head">
+        <button id="btnAddScene" class="btn">＋ 添加场次</button>
+        <span class="hint">每位演员填写上一场结束位置（“起”）与本场结束位置（“止”）；第一场只需填“止”。选择“—（台下）—”表示在后台。</span>
+      </div>
+      <div id="scenesList" class="scenes-list"></div>
+      <div class="actor-manager panel-card">
+        <h3>演员表</h3>
+        <div class="actor-row">
+          <button id="btnAddActor" class="btn">＋ 添加演员</button>
+          <span id="actorChips" class="actor-chips"></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ③ 不可穿越区域 -->
+    <section id="tab-blocks" class="tab-panel">
+      <div class="panel-head">
+        <span class="hint">为<strong>相邻场次之间的换场</strong>勾选不可穿越区域（被景片、灯架、乐池等占据）。检查时这些区域视为不可进入、不可经过。</span>
+      </div>
+      <div id="blocksList" class="blocks-list"></div>
+    </section>
+
+    <!-- ④ 连续性检查 -->
+    <section id="tab-check" class="tab-panel">
+      <div class="panel-head">
+        <button id="btnRunCheck" class="btn btn-primary btn-lg">▶ 运行连续性检查</button>
+        <div class="export-group">
+          <button id="btnExportJson" class="btn" disabled>导出结果 JSON</button>
+          <button id="btnExportMd" class="btn" disabled>导出检查报告 (Markdown)</button>
+        </div>
+      </div>
+      <div id="checkResult" class="check-result">
+        <p class="hint">尚未运行检查。完成前三个选项卡的录入后，点击上方按钮。</p>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="app.js"></script>
+</body>
+</html>

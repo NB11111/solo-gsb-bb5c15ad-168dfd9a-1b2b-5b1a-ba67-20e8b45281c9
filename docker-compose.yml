@@ -1,0 +1,17 @@
+services:
+  stageblock:
+    build: .
+    image: stageblock:latest
+    container_name: stageblock
+    ports:
+      - "3000:3000"
+    environment:
+      # 容器内监听端口（改左侧宿主映射即可换宿主端口）
+      PORT: "3000"
+      DB_PATH: "/data/stageblock.db"
+    volumes:
+      - stageblock-data:/data
+    restart: unless-stopped
+
+volumes:
+  stageblock-data:
