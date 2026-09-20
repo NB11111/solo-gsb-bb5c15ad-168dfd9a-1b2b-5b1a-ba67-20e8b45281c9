@@ -119,7 +119,10 @@ main { padding: 18px 20px 60px; max-width: 1280px; margin: 0 auto; }
 .edge-line { stroke: #8a8f99; stroke-width: 3; fill: none; cursor: pointer; }
 .edge-line:hover { stroke: var(--primary); }
 .edge-line.selected { stroke: var(--primary); stroke-width: 5; }
+.edge-line.narrow { stroke: var(--warn); stroke-dasharray: 9 5; }
+.edge-line.narrow:hover { stroke: var(--primary); }
 .edge-label-bg { fill: #fff; stroke: #c4c9d3; stroke-width: 1; rx: 4; cursor: pointer; }
+.edge-label-bg.narrow { fill: #fff6e8; stroke: var(--warn); }
 .edge-label { font-size: 13px; fill: var(--ink); text-anchor: middle; dominant-baseline: central; cursor: pointer; pointer-events: none; font-weight: 600; }
 
 .zone-circle {
@@ -149,6 +152,11 @@ main { padding: 18px 20px 60px; max-width: 1280px; margin: 0 auto; }
   padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; font-size: 13px;
 }
 .inspector .btn { width: 100%; margin-top: 6px; }
+.narrow-check {
+  display: flex; align-items: flex-start; gap: 8px;
+  font-size: 13px; margin: 4px 0 10px; cursor: pointer; line-height: 1.4;
+}
+.narrow-check input { margin-top: 2px; accent-color: var(--warn); }
 
 /* ---------- 场次 ---------- */
 .panel-head { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; flex-wrap: wrap; }
@@ -246,11 +254,21 @@ table.placements select { padding: 5px 6px; border: 1px solid var(--line); borde
 .ar-path { font-family: "SFMono-Regular", Consolas, monospace; font-size: 13px; color: var(--ink); }
 .ar-time { margin-left: auto; font-weight: 600; white-space: nowrap; }
 .ar-time.ok { color: var(--ok); }
-.ar-time.timeout, .ar-time.unreachable { color: var(--danger); }
+.ar-time.timeout, .ar-time.unreachable, .ar-time.congested { color: var(--danger); }
 .ar-time.offstage { color: var(--ink-soft); font-weight: 400; }
 .ar-reason { margin: 6px 0 0; font-size: 13px; color: var(--danger); background: #fdf3f3; border-left: 3px solid var(--danger); padding: 6px 10px; border-radius: 0 6px 6px 0; }
 .ar-note { margin: 4px 0 0; font-size: 12px; color: var(--ink-soft); }
+.ar-note.wait { color: var(--warn); }
 .baseline { color: var(--warn); }
+
+/* 窄通道预约明细 */
+.resv-box { padding: 10px 16px; background: #fffdf6; border-top: 1px dashed #f0d9ae; }
+.resv-title { font-size: 12px; color: #8a5a1d; font-weight: 600; margin-bottom: 6px; }
+.resv-table { border-collapse: collapse; width: 100%; }
+.resv-table th, .resv-table td {
+  font-size: 12px; padding: 4px 10px; border-bottom: 1px solid #f3e8cf; text-align: left;
+}
+.resv-table th { color: #8a5a1d; font-weight: 500; }
 
 .warnings-box {
   background: #fff8ec; border: 1px solid #f0d9ae; border-radius: 10px; padding: 10px 16px; margin-bottom: 14px;

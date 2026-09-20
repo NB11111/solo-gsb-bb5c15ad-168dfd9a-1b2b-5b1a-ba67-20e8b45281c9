@@ -212,17 +212,21 @@ function renderMap() {
     const g = svgEl('g', { 'data-edge-id': e.id, class: 'edge-group' });
     const line = svgEl('line', {
       x1: a.x, y1: a.y, x2: b.x, y2: b.y,
-      class: 'edge-line' + (state.selected.type === 'edge' && state.selected.id === e.id ? ' selected' : ''),
+      class:
+        'edge-line' +
+        (e.narrow ? ' narrow' : '') +
+        (state.selected.type === 'edge' && state.selected.id === e.id ? ' selected' : ''),
     });
     g.appendChild(line);
     const mx = (a.x + b.x) / 2;
     const my = (a.y + b.y) / 2;
-    const labelW = 40;
+    const labelW = e.narrow ? 56 : 40;
     const rect = svgEl('rect', {
-      x: mx - labelW / 2, y: my - 12, width: labelW, height: 24, class: 'edge-label-bg',
+      x: mx - labelW / 2, y: my - 12, width: labelW, height: 24,
+      class: 'edge-label-bg' + (e.narrow ? ' narrow' : ''),
     });
     const text = svgEl('text', { x: mx, y: my, class: 'edge-label' });
-    text.textContent = `${e.seconds}s`;
+    text.textContent = `${e.seconds}s${e.narrow ? '·窄' : ''}`;
     g.appendChild(rect);
     g.appendChild(text);
     g.addEventListener('click', (ev) => {
@@ -377,11 +381,20 @@ function renderInspector() {
       <h3>邻接边</h3>
       <p class="hint">${esc(a ? a.name : e.a)} ↔ ${esc(b ? b.name : e.b)}（双向可通行）</p>
       <div class="field"><label>通行秒数</label><input id="inspEdgeSec" type="number" min="0" step="1" value="${e.seconds}"></div>
+      <label class="narrow-check" title="窄通道双向共用一份容量：同一时刻仅一名演员可通行，其余演员需在入口区域等待或绕路">
+        <input id="inspEdgeNarrow" type="checkbox" ${e.narrow ? 'checked' : ''}>
+        <span>窄通道（同一时刻仅一人通行，其余等待或绕路）</span>
+      </label>
       <button id="inspEdgeDel" class="btn btn-danger">删除邻接边</button>
     `;
     $('#inspEdgeSec').addEventListener('change', (ev) => {
       const v = Number(ev.target.value);
       e.seconds = Number.isFinite(v) && v >= 0 ? v : e.seconds;
+      markDirty();
+      renderMap();
+    });
+    $('#inspEdgeNarrow').addEventListener('change', (ev) => {
+      e.narrow = ev.target.checked;
       markDirty();
       renderMap();
     });
@@ -398,7 +411,7 @@ function renderInspector() {
   box.innerHTML = `
     <p class="hint">在舞台上点击区域可选中；按住拖动可移动位置。</p>
     <p class="hint">开启「连线模式」后，依次点击两个区域即可建立邻接边；再次点击同一区域可取消。</p>
-    <p class="hint">邻接边为双向，边上的数字为演员通行所需秒数。</p>
+    <p class="hint">邻接边为双向，边上的数字为演员通行所需秒数。点击边线可将其设为「窄通道」（橙色虚线）：窄通道双向共用一份容量，同一时刻仅一名演员可通行。</p>
   `;
 }
 
@@ -631,7 +644,25 @@ async function runCheck() {
 }
 
 function statusText(st) {
-  return { ok: '按时可达', timeout: '超时', unreachable: '不可达', offstage: '台下/后台' }[st] || st;
+  return {
+    ok: '按时可达',
+    timeout: '原本即超时',
+    congested: '窄通道拥堵',
+    unreachable: '不可达',
+    offstage: '台下/后台',
+  }[st] || st;
+}
+
+/** 把逐段调度渲染成 "A —[0–8s]→ B ⏸等8s —[8–16s·窄]→ C" 形式的时间线文本 */
+function schedulePathText(a) {
+  if (!a.schedule || !a.schedule.length) return (a.pathZoneNames || []).join(' → ');
+  let s = '';
+  a.schedule.forEach((leg, idx) => {
+    if (idx === 0) s += leg.fromZoneName;
+    if (leg.waitBefore > 0) s += ` ⏸等${leg.waitBefore}s`;
+    s += ` —[${leg.enterAt}–${leg.leaveAt}s${leg.narrow ? '·窄' : ''}]→ ${leg.toZoneName}`;
+  });
+  return s;
 }
 
 function renderReport() {
@@ -653,12 +684,15 @@ function renderReport() {
     <div class="summary-bar">
       <span class="summary-item">场次<b>${r.stats.sceneCount}</b></span>
       <span class="summary-item">换场次数<b>${r.stats.transitionCount}</b></span>
+      <span class="summary-item">窄通道<b>${r.stats.narrowEdgeCount}</b></span>
       <span class="summary-item">演员转场检查<b>${r.stats.checkedActorTransitions}</b></span>
       <span class="summary-item">失败转场人次<b>${r.stats.failedActorTransitions}</b></span>
+      <span class="summary-item">其中窄通道拥堵<b>${r.stats.congestedActorTransitions}</b></span>
     </div>`;
 
     if (r.firstImpossible) {
       const f = r.firstImpossible;
+      const fLabel = { timeout: '原本即超时', congested: '窄通道拥堵', unreachable: '路线被阻断' }[f.status] || f.status;
       html += `
       <div class="verdict bad">
         <div>⛔</div>
@@ -666,9 +700,9 @@ function renderReport() {
           <div class="big">发现不可能转场（按场次顺序的第一处）</div>
           <div style="margin-top:6px">
             第 ${f.transitionIndex + 1} 场开始前：<code>${esc(f.fromSceneName)} → ${esc(f.toSceneName)}</code>，
-            演员 <b>${esc(f.actorName)}</b>（${f.status === 'timeout' ? '最短路径仍超时' : '路线被阻断'}）
+            演员 <b>${esc(f.actorName)}</b>（${fLabel}）
           </div>
-          <div style="margin-top:6px">阻断原因：${esc(f.reason)}</div>
+          <div style="margin-top:6px">原因：${esc(f.reason)}</div>
         </div>
       </div>`;
     } else {
@@ -676,7 +710,7 @@ function renderReport() {
       <div class="verdict ok">
         <div>✅</div>
         <div><div class="big">全部转场连续</div>
-        <div>所有演员在每一对相邻场次之间都存在不超过换场时长的通行路线。</div></div>
+        <div>所有演员在每一对相邻场次之间都能在换场时长内完成转场（含窄通道等待与绕路调度）。</div></div>
       </div>`;
     }
 
@@ -696,6 +730,7 @@ function renderReport() {
           <span class="status-tag ${t.possible ? 'ok' : 'bad'}">${t.possible ? '可行' : '不可行'}</span>
           <span class="meta">换场可用 ${t.limitSeconds} 秒</span>
           ${t.blockedZoneNames.length ? `<span class="meta">不可穿越：${t.blockedZoneNames.map(esc).join('、')}</span>` : ''}
+          ${t.narrowReservations.length ? `<span class="meta">窄通道预约 ${t.narrowReservations.length} 段</span>` : ''}
           ${isFirst ? '<span class="first-bad-flag">首个不可能转场</span>' : ''}
         </div>`;
       for (const a of t.results) {
@@ -704,23 +739,52 @@ function renderReport() {
             ? '—'
             : a.status === 'unreachable'
               ? a.baselinePathZoneNames.length
-                ? `无阻断基线：${a.baselinePathZoneNames.map(esc).join(' → ')}`
+                ? `无阻断基线：${a.baselinePathZoneNames.join(' → ')}`
                 : '无可用路线'
-              : a.pathZoneNames.map(esc).join(' → ');
+              : schedulePathText(a);
+        const timeText =
+          a.status === 'offstage'
+            ? statusText(a.status)
+            : a.status === 'unreachable'
+              ? '不可达'
+              : `${a.seconds}s / ${t.limitSeconds}s${a.waitSeconds > 0 ? `（含等待 ${a.waitSeconds}s）` : ''}`;
         html += `
         <div class="actor-result">
           <div class="ar-line1">
             <span class="ar-actor">${esc(a.actorName)}</span>
-            <span class="ar-path">${route}</span>
+            <span class="ar-path">${esc(route)}</span>
             <span class="ar-time ${a.status}">
-              ${a.status === 'offstage' ? statusText(a.status) : a.status === 'unreachable' ? '不可达' : `${a.seconds}s / ${t.limitSeconds}s`}
+              ${timeText}
               · ${statusText(a.status)}
             </span>
           </div>
+          ${(a.waits || [])
+            .map(
+              (w) =>
+                `<p class="ar-note wait">⏸ ${w.fromTime}s–${w.toTime}s 在「${esc(w.zoneName)}」等待 ${w.waitSeconds}s，避让窄通道「${esc(w.edgeLabel)}」</p>`,
+            )
+            .join('')}
+          ${a.detourForCongestionSeconds > 0 ? `<p class="ar-note baseline">为避开窄通道拥堵选择绕路，比不计拥堵的最短路线多走 ${a.detourForCongestionSeconds} 秒</p>` : ''}
           ${a.status === 'unreachable' ? `<p class="ar-reason">⛔ ${esc(a.reason)}</p>` : ''}
           ${a.status === 'timeout' ? `<p class="ar-reason">⏱ ${esc(a.reason)}</p>` : ''}
+          ${a.status === 'congested' ? `<p class="ar-reason">🚪 ${esc(a.reason)}</p>` : ''}
           ${a.status === 'offstage' ? `<p class="ar-note">${esc(a.reason)}</p>` : ''}
           ${a.status === 'ok' && a.detourExtraSeconds > 0 ? `<p class="ar-note baseline">受不可穿越区域影响绕行，比无阻断最短路线多 ${a.detourExtraSeconds} 秒（无阻断 ${a.baselineSeconds} 秒）</p>` : ''}
+        </div>`;
+      }
+      if (t.narrowReservations && t.narrowReservations.length) {
+        html += `
+        <div class="resv-box">
+          <div class="resv-title">🚪 窄通道预约明细（双向共用容量，按进入时间排序）</div>
+          <table class="resv-table">
+            <thead><tr><th>窄通道</th><th>演员</th><th>进入</th><th>离开</th></tr></thead>
+            <tbody>${t.narrowReservations
+              .map(
+                (x) =>
+                  `<tr><td>${esc(x.edgeLabel)}</td><td>${esc(x.actorName)}</td><td>${x.enterAt}s</td><td>${x.leaveAt}s</td></tr>`,
+              )
+              .join('')}</tbody>
+          </table>
         </div>`;
       }
       html += '</div>';
@@ -765,8 +829,21 @@ function exportMarkdown() {
   L.push('');
   L.push(`- 检查时间：${new Date(r.checkedAt).toLocaleString('zh-CN')}`);
   L.push(`- 场次：${r.stats.sceneCount}；换场次数：${r.stats.transitionCount}`);
-  L.push(`- 演员转场检查：${r.stats.checkedActorTransitions} 人次；失败：${r.stats.failedActorTransitions} 人次`);
+  L.push(`- 演员转场检查：${r.stats.checkedActorTransitions} 人次；失败：${r.stats.failedActorTransitions} 人次（其中窄通道拥堵 ${r.stats.congestedActorTransitions} 人次）`);
   L.push(`- 总体结论：**${!r.ok ? '文档校验未通过' : r.firstImpossible ? '存在不可能转场 ❌' : '全部转场连续 ✅'}**`);
+  L.push('');
+
+  L.push('## 窄通道配置');
+  L.push('');
+  if (r.narrowEdges && r.narrowEdges.length) {
+    L.push('窄通道双向共用一份容量：同一时刻仅一名演员可通行，其余演员在入口区域等待或绕路。');
+    L.push('');
+    L.push('| 窄通道 | 通行秒数 |');
+    L.push('| --- | --- |');
+    r.narrowEdges.forEach((e) => L.push(`| ${e.aName} ↔ ${e.bName} | ${e.seconds} 秒 |`));
+  } else {
+    L.push('（本剧目未设置窄通道，所有邻接边均可同时通行）');
+  }
   L.push('');
 
   if (!r.ok) {
@@ -777,41 +854,58 @@ function exportMarkdown() {
 
   if (r.firstImpossible) {
     const f = r.firstImpossible;
+    const fLabel = { timeout: '原本即超时', congested: '窄通道拥堵', unreachable: '不可达' }[f.status] || f.status;
     L.push('## 首个不可能转场');
     L.push('');
     L.push(`- 位置：第 ${f.transitionIndex + 1} 场开始前，${f.fromSceneName} → ${f.toSceneName}`);
-    L.push(`- 演员：${f.actorName}（${f.status === 'timeout' ? '超时' : '不可达'}）`);
-    L.push(`- 阻断原因：${f.reason}`);
+    L.push(`- 演员：${f.actorName}（${fLabel}）`);
+    L.push(`- 原因：${f.reason}`);
     L.push('');
   }
 
   if (r.warnings.length) {
-    L.push('## 绕行 / 提示');
+    L.push('## 绕行 / 等待 / 提示');
     r.warnings.forEach((w) => L.push(`- ${w}`));
     L.push('');
   }
 
   L.push('## 逐场转场明细');
   L.push('');
+  L.push('每次转场按演员表顺序预约调度：普通边可同时通行；窄通道同一时刻仅一人占用，');
+  L.push('其余演员在区域等待（⏸）或绕路。路线中 `—[进入–离开s]→` 为各段通行时间窗。');
+  L.push('');
   for (const t of r.transitions) {
     L.push(`### ${t.fromSceneName} → ${t.toSceneName}（第 ${t.index + 1} 场前，可用 ${t.limitSeconds} 秒）— ${t.possible ? '可行 ✅' : '不可行 ❌'}`);
     if (t.blockedZoneNames.length) L.push(`不可穿越区域：${t.blockedZoneNames.join('、')}`);
     L.push('');
-    L.push('| 演员 | 状态 | 最短耗时 | 路线 / 原因 |');
-    L.push('| --- | --- | --- | --- |');
+    L.push('| 演员 | 状态 | 到达耗时 | 其中等待 | 路线（含各段进入/离开时间）与原因 |');
+    L.push('| --- | --- | --- | --- | --- |');
     for (const a of t.results) {
       let detail;
       if (a.status === 'offstage') detail = a.reason;
       else if (a.status === 'unreachable') detail = `不可达：${a.reason}`;
       else {
-        detail = `${a.pathZoneNames.join(' → ')}（${a.seconds} 秒）`;
-        if (a.detourExtraSeconds > 0) detail += `；绕行多耗时 ${a.detourExtraSeconds} 秒`;
-        if (a.status === 'timeout') detail += `；${a.reason}`;
+        detail = schedulePathText(a);
+        if (a.detourExtraSeconds > 0) detail += `；因不可穿越区域绕行多 ${a.detourExtraSeconds} 秒`;
+        if (a.detourForCongestionSeconds > 0) detail += `；为避窄通道拥堵绕行多 ${a.detourForCongestionSeconds} 秒`;
+        if (a.waits && a.waits.length) {
+          detail += `；等待段：${a.waits.map((w) => `${w.fromTime}s–${w.toTime}s 在「${w.zoneName}」等 ${w.waitSeconds}s 避让「${w.edgeLabel}」`).join('，')}`;
+        }
+        if (a.status === 'timeout' || a.status === 'congested') detail += `；${a.reason}`;
       }
       const secs = a.seconds == null ? '—' : `${a.seconds} 秒`;
-      L.push(`| ${a.actorName} | ${statusText(a.status)} | ${secs} | ${detail.replace(/\|/g, '\\|')} |`);
+      const wait = a.waitSeconds > 0 ? `${a.waitSeconds} 秒` : '—';
+      L.push(`| ${a.actorName} | ${statusText(a.status)} | ${secs} | ${wait} | ${detail.replace(/\|/g, '\\|')} |`);
     }
     L.push('');
+    if (t.narrowReservations && t.narrowReservations.length) {
+      L.push('窄通道预约明细（按进入时间排序）：');
+      L.push('');
+      L.push('| 窄通道 | 演员 | 进入 | 离开 |');
+      L.push('| --- | --- | --- | --- |');
+      t.narrowReservations.forEach((x) => L.push(`| ${x.edgeLabel} | ${x.actorName} | ${x.enterAt}s | ${x.leaveAt}s |`));
+      L.push('');
+    }
   }
 
   download(`${safeName()}-检查报告-${fileStamp()}.md`, L.join('\n'), 'text/markdown;charset=utf-8');

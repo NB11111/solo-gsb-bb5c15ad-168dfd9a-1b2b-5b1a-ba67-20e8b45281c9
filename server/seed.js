@@ -19,7 +19,8 @@ const demo = {
     { id: 'e1', a: 'z1', b: 'z2', seconds: 5 },
     { id: 'e2', a: 'z2', b: 'z3', seconds: 8 },
     { id: 'e3', a: 'z3', b: 'z4', seconds: 10 },
-    { id: 'e4', a: 'z3', b: 'z5', seconds: 8 },
+    // 窄通道：左台口与台心之间只容一人通过，双向共用，其余演员需等待或绕路
+    { id: 'e4', a: 'z3', b: 'z5', seconds: 8, narrow: true },
     { id: 'e5', a: 'z4', b: 'z5', seconds: 12 },
     { id: 'e6', a: 'z5', b: 'z6', seconds: 8 },
     { id: 'e7', a: 'z5', b: 'z7', seconds: 12 },
